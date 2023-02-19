@@ -61,6 +61,8 @@ use std::{
 use tokio::sync::mpsc::{self, error::SendError, Receiver, Sender};
 
 type ChannelId = u64;
+type MutexError<'a, M, T> = PoisonError<MutexGuard<'a, ManagerInner<M, T>>>;
+type MutexResult<'a, O, M, T> = Result<O, MutexError<'a, M, T>>;
 
 /// SSE manager
 #[derive(Debug, Clone)]
@@ -109,12 +111,7 @@ where
 {
     /// Creates a new manager
     pub fn new() -> Self {
-        let inner = ManagerInner {
-            last_id: 0,
-            channels: HashMap::new(),
-            tags: HashMap::new(),
-        };
-        Self(Arc::new(Mutex::new(inner)))
+        Default::default()
     }
 
     /// Creates a new stream of SSE events
@@ -140,11 +137,10 @@ where
 
     /// Creates a new channel and returns an event receiver and a guard to clean the manager when
     /// the channel is closed
-    pub fn create_channel<'a>(
-        &'a mut self,
+    pub fn create_channel(
+        &mut self,
         tags: impl Into<Vec<T>>,
-    ) -> Result<(Receiver<M>, ChannelGuard<M, T>), PoisonError<MutexGuard<'a, ManagerInner<M, T>>>>
-    {
+    ) -> MutexResult<(Receiver<M>, ChannelGuard<M, T>), M, T> {
         let tags = tags.into();
         // TODO is there reasons for a bigger size?
         let (tx, rx) = mpsc::channel::<M>(1);
@@ -317,5 +313,20 @@ where
         if empty {
             self.tags.remove(tag);
         }
+    }
+}
+
+impl<M, T> Default for SseManager<M, T>
+where
+    M: Debug + Clone,
+    T: Debug + Clone + Eq + Hash + PartialEq,
+{
+    fn default() -> Self {
+        let inner = ManagerInner {
+            last_id: 0,
+            channels: HashMap::new(),
+            tags: HashMap::new(),
+        };
+        Self(Arc::new(Mutex::new(inner)))
     }
 }
