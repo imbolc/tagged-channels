@@ -1,6 +1,50 @@
 //! # axum-sse-manager
 //!
 //! SSE channels manager for Axum framework
+//!
+//! ## Usage
+//!
+//! ```rust,no_run
+//! # use serde::{Deserialize, Serialize};
+//! # use axum_sse_manager::SseManager;
+//! # tokio_test::block_on(async {
+//!
+//! // We're going to tag channels
+//! #[derive(Clone, Debug, Eq, Hash, PartialEq)]
+//! enum Tag {
+//!     UserId(i32),
+//!     IsAdmin,
+//! }
+//!
+//! // Events we're going to send
+//! #[derive(Clone, Debug, Deserialize, Serialize)]
+//! #[serde(tag = "_type")]
+//! enum Message {
+//!     Ping,
+//! }
+//!
+//! // Create the manager
+//! let sse = SseManager::<Message, Tag>::new();
+//!
+//! // Connect as an user#1, admin
+//! let stream = sse.create_stream([Tag::UserId(1), Tag::IsAdmin]).await;
+//!
+//! # let sse = axum_sse_manager::SseManager::new();
+//!
+//! // Message to user#1
+//! sse.send_by_tag(&Tag::UserId(1), Message::Ping).await;
+//!
+//! // Message to all admins
+//! sse.send_by_tag(&Tag::UserId(1), Message::Ping).await;
+//!
+//! // Message to everyone
+//! sse.broadcast(Message::Ping).await;
+//! # })
+//! ```
+//!
+//! Look at the [full example][example] for detail.
+//!
+//! [example]: https://github.com/imbolc/axum-sse-manager/blob/main/examples/users.rs
 
 #![warn(clippy::all, missing_docs, nonstandard_style, future_incompatible)]
 
@@ -84,7 +128,6 @@ where
         let tags = tags.into();
         async_stream::stream! {
             let Ok((mut rx, _guard)) = self.create_channel(tags) else { return };
-            println!("connected #{}", _guard.channel_id);
             loop {
                 if let Some(msg) = rx.recv().await {
                     if let Ok(json) = serde_json::to_string(&msg) {
@@ -124,13 +167,7 @@ where
         }
         inner.last_id = channel_id;
 
-        Ok((
-            rx,
-            ChannelGuard {
-                channel_id,
-                manager: self.clone(),
-            },
-        ))
+        Ok((rx, ChannelGuard::new(channel_id, self.clone())))
     }
 
     /// Removes the channel from the manager
@@ -258,7 +295,6 @@ where
 {
     fn drop(&mut self) {
         self.manager.remove_channel(&self.channel_id);
-        println!("disconnected #{}", self.channel_id);
     }
 }
 
