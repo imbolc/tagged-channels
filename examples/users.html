@@ -1,0 +1,133 @@
+<h1>SSE manager</h1>
+
+<main>
+    <form id="send-user" onsubmit="send(this); return false">
+        <fieldset>
+            <legend>Send to a particular user</legend>
+            <input name="user_id" type="number" required placeholder="User id">
+            <input name="message" type="text" required placeholder="Message">
+            <input type="hidden" name="_type" value="User">
+            <button>Send</button>
+        </fieldset>
+    </form> 
+
+    <form id="send-admins" onsubmit="send(this); return false">
+        <fieldset>
+            <legend>Send to all admins</legend>
+            <input name="message" type="text" required placeholder="Message">
+            <input type="hidden" name="_type" value="Admin">
+            <button>Send</button>
+        </fieldset>
+    </form> 
+
+    <form id="broadcast" onsubmit="send(this); return false">
+        <fieldset>
+            <legend>Broadcast to everyone</legend>
+            <input name="message" type="text" required placeholder="Message">
+            <input type="hidden" name="_type" value="Broadcast">
+            <button>Send</button>
+        </fieldset>
+    </form> 
+
+    <fieldset id="sent">
+        <legend>Sent events</legend>
+        <textarea readonly></textarea>
+    </fieldset>
+
+    <form id="connect" onsubmit="connect(this); return false">
+        <fieldset>
+            <legend>Connect to receive events</legend>
+            <input name="user_id" type="number" placeholder="User id">
+            <label><input name="is_admin" type="checkbox"> Admin</label>
+            <button>Connect</button>
+        </fieldset>
+    </form> 
+
+    <fieldset id="received" hidden>
+        <legend>Received events</legend>
+        <textarea readonly></textarea>
+    </fieldset>
+</main>
+
+<script>
+let $ = document.querySelector;
+
+async function send(form) {
+    let data = Object.fromEntries(new FormData(form));
+    data.user_id && (data.user_id = parseInt(data.user_id));
+    let body = JSON.stringify(data);
+    try {
+        let r = await fetch("/send", {
+            method: "POST",
+            body,
+            headers: { "Content-Type": "application/json" }
+        })
+        if (!r.ok) { throw r }
+        form.reset();
+        add_message("#sent textarea", body);
+    } catch (e) {
+        alert(e.status + ": " + e.statusText);
+    }
+}
+
+async function connect(form) {
+    let data = new FormData(form);
+    let user_id = data.get("user_id");
+    let is_admin = data.get("is_admin") ? true : false;
+
+    let params = new URLSearchParams({ is_admin });
+    user_id && params.append("user_id", user_id);
+    let eventSource = new EventSource("/events?" + params.toString());
+    eventSource.onmessage = function (event) {
+        add_message("#received textarea", event.data);
+    };
+
+    let info = [];
+    if (!user_id && !is_admin) {
+        info.push("guest (will see only broadcast events)");
+    }
+    if (user_id) {
+        info.push(`user #${user_id} (will see events sent to the user)`);
+    }
+    if (is_admin) {
+        info.push("admin (will see admin events)");
+    }
+    form.innerHTML = `<i id="connect-info">Connected as ${info.join(", ")}</i>`;
+    document.querySelector("#received").hidden = false;
+}
+
+function add_message(selector, message) {
+    console.log(selector, message)
+    let el = document.querySelector(selector);
+    el.value += message + "\n";
+    el.scrollTop = el.scrollHeight;
+}
+</script>
+
+<style>
+    html {font-family: monospace}
+    main {
+        display: grid;
+        grid-gap: 0.5em 1em;
+        grid-template-columns: 1fr 1fr;
+        grid-template-areas: 
+            "send-user   connect"
+            "send-admins received"
+            "broadcast   received"
+            "sent        received";
+    }
+    textarea { width: 100%; height: 100%; border: 0}
+    #send-user { grid-area: send-user }
+    #send-admins { grid-area: send-admins }
+    #broadcast { grid-area: broadcast }
+    #sent { grid-area: sent; min-height: 15em; }
+    #connect { grid-area: connect }
+    #received { grid-area: received }
+    #connect-info {
+        display: flex;
+        align-items: self-end;
+        height: 100%;
+        justify-content: center;
+    }
+</style>
+
