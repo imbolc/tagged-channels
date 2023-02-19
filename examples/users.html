@@ -97,7 +97,6 @@ async function connect(form) {
 }
 
 function add_message(selector, message) {
-    console.log(selector, message)
     let el = document.querySelector(selector);
     el.value += message + "\n";
     el.scrollTop = el.scrollHeight;

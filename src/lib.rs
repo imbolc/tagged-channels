@@ -50,19 +50,18 @@
 
 use axum::response::sse::Event;
 use futures::stream::Stream;
+use parking_lot::Mutex;
 use serde::Serialize;
 use std::{
     collections::{HashMap, HashSet},
     convert::Infallible,
     fmt::Debug,
     hash::Hash,
-    sync::{Arc, Mutex, MutexGuard, PoisonError},
+    sync::Arc,
 };
 use tokio::sync::mpsc::{self, error::SendError, Receiver, Sender};
 
 type ChannelId = u64;
-type MutexError<'a, M, T> = PoisonError<MutexGuard<'a, ManagerInner<M, T>>>;
-type MutexResult<'a, O, M, T> = Result<O, MutexError<'a, M, T>>;
 
 /// SSE manager
 #[derive(Debug, Clone)]
@@ -124,7 +123,7 @@ where
     {
         let tags = tags.into();
         async_stream::stream! {
-            let Ok((mut rx, _guard)) = self.create_channel(tags) else { return };
+            let (mut rx, _guard) = self.create_channel(tags);
             loop {
                 if let Some(msg) = rx.recv().await {
                     if let Ok(json) = serde_json::to_string(&msg) {
@@ -137,19 +136,16 @@ where
 
     /// Creates a new channel and returns an event receiver and a guard to clean the manager when
     /// the channel is closed
-    pub fn create_channel(
-        &mut self,
-        tags: impl Into<Vec<T>>,
-    ) -> MutexResult<(Receiver<M>, ChannelGuard<M, T>), M, T> {
+    pub fn create_channel(&mut self, tags: impl Into<Vec<T>>) -> (Receiver<M>, ChannelGuard<M, T>) {
         let tags = tags.into();
         // TODO is there reasons for a bigger size?
-        let (tx, rx) = mpsc::channel::<M>(1);
+        let (tx, rx) = mpsc::channel::<M>(1024);
         let channel = Channel {
             tx,
             tags: tags.clone().into_boxed_slice(),
         };
 
-        let mut inner = self.0.lock()?;
+        let mut inner = self.0.lock();
         let channel_id = inner.last_id.overflowing_add(1).0;
         inner.channels.insert(channel_id, channel);
         for tag in tags {
@@ -163,36 +159,32 @@ where
         }
         inner.last_id = channel_id;
 
-        Ok((rx, ChannelGuard::new(channel_id, self.clone())))
+        (rx, ChannelGuard::new(channel_id, self.clone()))
     }
 
     /// Removes the channel from the manager
     fn remove_channel(&mut self, channel_id: &ChannelId) {
-        if let Ok(mut inner) = self.0.lock() {
-            if let Some(channel) = inner.channels.remove(channel_id) {
-                for tag in channel.tags.iter() {
-                    inner.remove_channel_tag(channel_id, tag);
-                }
+        let mut inner = self.0.lock();
+        if let Some(channel) = inner.channels.remove(channel_id) {
+            for tag in channel.tags.iter() {
+                inner.remove_channel_tag(channel_id, tag);
             }
         }
     }
 
     /// Returns senders by tag
     fn sender_by_tag(&self, tag: &T) -> Vec<Sender<M>> {
-        let Ok(inner) = self.0.lock() else { return Default::default() };
-        let Some(channel_ids) = inner.tags.get(tag) else {return Default::default() };
-        channel_ids
-            .iter()
-            .filter_map(|id| inner.clone_tx(id))
-            .collect()
+        let inner = self.0.lock();
+        inner
+            .tags
+            .get(tag)
+            .map(|ids| ids.iter().filter_map(|id| inner.clone_tx(id)).collect())
+            .unwrap_or_default()
     }
 
     /// Returns the session `Sender`
     fn one_tx(&self, channel_id: &ChannelId) -> Option<Sender<M>> {
-        self.0
-            .lock()
-            .ok()
-            .and_then(|inner| inner.clone_tx(channel_id))
+        self.0.lock().clone_tx(channel_id)
     }
 
     /// Returns senders for multiple sessions
@@ -200,34 +192,26 @@ where
     where
         I: IntoIterator<Item = &'a ChannelId>,
     {
-        self.0
-            .lock()
-            .ok()
-            .map(|inner| {
-                channel_ids
-                    .into_iter()
-                    .filter_map(|id| inner.clone_tx(id))
-                    .collect()
-            })
-            .unwrap_or_default()
+        let inner = self.0.lock();
+        channel_ids
+            .into_iter()
+            .filter_map(|id| inner.clone_tx(id))
+            .collect()
     }
 
     /// Returns senders for all sessions
     fn all_tx(&self) -> Vec<Sender<M>> {
         self.0
             .lock()
-            .ok()
-            .map(|inner| inner.channels.values().map(|c| c.tx.clone()).collect())
-            .unwrap_or_default()
+            .channels
+            .values()
+            .map(|c| c.tx.clone())
+            .collect()
     }
 
     /// Returns all session ids
     pub fn channel_ids(&self) -> Vec<ChannelId> {
-        self.0
-            .lock()
-            .ok()
-            .map(|inner| inner.channels.keys().cloned().collect())
-            .unwrap_or_default()
+        self.0.lock().channels.keys().cloned().collect()
     }
 
     /// Sends the message to all tagged channels
