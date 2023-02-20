@@ -33,7 +33,7 @@
 //! manager.send_by_tag(&Tag::UserId(1), Message::Ping).await;
 //!
 //! // Message to all admins
-//! manager.send_by_tag(&Tag::UserId(1), Message::Ping).await;
+//! manager.send_by_tag(&Tag::IsAdmin, Message::Ping).await;
 //!
 //! // Message to everyone
 //! manager.broadcast(Message::Ping).await;
@@ -64,7 +64,7 @@ use tokio::sync::mpsc::{self, Receiver, Sender};
 
 type ChannelId = u64;
 
-/// SSE manager
+/// Channels manager
 pub struct TaggedChannels<M, T>(Arc<Mutex<ChannelsInner<M, T>>>);
 
 impl<M, T> Clone for TaggedChannels<M, T> {

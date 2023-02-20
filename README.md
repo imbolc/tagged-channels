@@ -36,7 +36,7 @@ let mut manager = TaggedChannels::<Message, Tag>::new();
 manager.send_by_tag(&Tag::UserId(1), Message::Ping).await;
 
 // Message to all admins
-manager.send_by_tag(&Tag::UserId(1), Message::Ping).await;
+manager.send_by_tag(&Tag::IsAdmin, Message::Ping).await;
 
 // Message to everyone
 manager.broadcast(Message::Ping).await;
