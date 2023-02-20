@@ -1,23 +1,23 @@
 use axum::{
     extract::{
-        ws::{self, WebSocket, WebSocketUpgrade},
+        ws::{Message as WsMessage, WebSocket, WebSocketUpgrade},
         Json, Query, State,
     },
     response::{
-        sse::{self, Sse},
+        sse::{Event as SseEvent, Sse},
         Html, IntoResponse,
     },
     routing::{get, post},
     Router,
 };
-use axum_sse_manager::SseManager;
 use futures::stream::Stream;
 use serde::{Deserialize, Serialize};
 use std::convert::Infallible;
 use std::net::SocketAddr;
+use tagged_channels::TaggedChannels;
 
 #[derive(Clone, Eq, Hash, PartialEq)]
-enum StreamTag {
+enum ChannelTag {
     UserId(i32),
     IsAdmin,
 }
@@ -49,14 +49,14 @@ struct ConnectionParams {
 
 #[tokio::main]
 async fn main() {
-    let channels = SseManager::new();
+    let channels = TaggedChannels::new();
     let app = Router::new()
         .route("/", get(index))
         .route("/send", post(send))
         .route("/sse", get(sse_ui))
         .route("/ws", get(ws_ui))
         .route("/sse-events", get(events))
-        .route("/ws-events", get(ws_handler))
+        .route("/ws-events", get(ws_events))
         .with_state(channels);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
@@ -82,64 +82,70 @@ async fn ws_ui() -> Html<String> {
     Html(include_str!("ui.html").replace("{{example}}", "ws"))
 }
 
-/// Handler for browser to receive SSE events
-async fn events(
-    State(sessions): State<SseManager<EventMessage, StreamTag>>,
-    Query(ConnectionParams { user_id, is_admin }): Query<ConnectionParams>,
-) -> Sse<impl Stream<Item = Result<sse::Event, Infallible>>> {
-    let mut tags = Vec::new();
-    if let Some(id) = user_id {
-        tags.push(StreamTag::UserId(id));
-    }
-    if is_admin {
-        tags.push(StreamTag::IsAdmin);
-    }
-    let stream = sessions.create_stream(tags).await;
-    Sse::new(stream)
-}
-
 async fn send(
-    State(sse): State<SseManager<EventMessage, StreamTag>>,
+    State(channels): State<TaggedChannels<EventMessage, ChannelTag>>,
     Json(message): Json<EventMessage>,
 ) {
     use EventMessage::*;
     match message {
         User(data) => {
-            sse.send_by_tag(&StreamTag::UserId(data.user_id), User(data))
-                .await
+            let tag = ChannelTag::UserId(data.user_id);
+            channels.send_by_tag(&tag, User(data)).await
         }
-        Admin(data) => sse.send_by_tag(&StreamTag::IsAdmin, Admin(data)).await,
-        Broadcast(data) => sse.broadcast(Broadcast(data)).await,
+        Admin(data) => {
+            let tag = ChannelTag::IsAdmin;
+            channels.send_by_tag(&tag, Admin(data)).await
+        }
+        Broadcast(data) => channels.broadcast(Broadcast(data)).await,
     }
 }
 
-async fn ws_handler(
+/// Handler for browser to receive SSE events
+async fn events(
+    Query(params): Query<ConnectionParams>,
+    State(mut channels): State<TaggedChannels<EventMessage, ChannelTag>>,
+) -> Sse<impl Stream<Item = Result<SseEvent, Infallible>>> {
+    let stream = async_stream::stream! {
+        let mut rx = channels.create_channel(params.as_tags());
+        while let Some(msg) = rx.recv().await {
+            let Ok(json) = serde_json::to_string(&msg) else { continue };
+            yield Ok(SseEvent::default().data(json));
+        }
+    };
+    Sse::new(stream)
+}
+
+async fn ws_events(
     ws: WebSocketUpgrade,
-    Query(ConnectionParams { user_id, is_admin }): Query<ConnectionParams>,
-    State(manager): State<SseManager<EventMessage, StreamTag>>,
+    Query(params): Query<ConnectionParams>,
+    State(channels): State<TaggedChannels<EventMessage, ChannelTag>>,
 ) -> impl IntoResponse {
-    let mut tags = Vec::new();
-    if let Some(id) = user_id {
-        tags.push(StreamTag::UserId(id));
-    }
-    if is_admin {
-        tags.push(StreamTag::IsAdmin);
-    }
-    ws.on_upgrade(move |socket| handle_socket(socket, manager, tags))
+    ws.on_upgrade(move |socket| ws_socket(socket, channels, params.as_tags()))
 }
 
-/// Actual websocket statemachine (one will be spawned per connection)
-async fn handle_socket(
+async fn ws_socket(
     mut socket: WebSocket,
-    mut manager: SseManager<EventMessage, StreamTag>,
-    tags: Vec<StreamTag>,
+    mut channels: TaggedChannels<EventMessage, ChannelTag>,
+    tags: Vec<ChannelTag>,
 ) {
-    let mut rx = manager.create_channel(tags);
-    loop {
-        let Some(msg) = rx.recv().await else { break; };
-        let Ok(json) = serde_json::to_string(&msg) else { continue; };
-        if socket.send(ws::Message::Text(json)).await.is_err() {
+    let mut rx = channels.create_channel(tags);
+    while let Some(msg) = rx.recv().await {
+        let Ok(json) = serde_json::to_string(&msg) else { continue };
+        if socket.send(WsMessage::Text(json)).await.is_err() {
             break;
         }
+    }
+}
+
+impl ConnectionParams {
+    fn as_tags(&self) -> Vec<ChannelTag> {
+        let mut tags = Vec::new();
+        if let Some(id) = self.user_id {
+            tags.push(ChannelTag::UserId(id));
+        }
+        if self.is_admin {
+            tags.push(ChannelTag::IsAdmin);
+        }
+        tags
     }
 }

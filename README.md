@@ -4,7 +4,7 @@
 
 <!-- cargo-sync-readme start -->
 
-# axum-sse-manager
+# tagged-channel
 
 SSE channels manager for Axum framework
 
@@ -27,7 +27,7 @@ enum Message {
 }
 
 // Create the manager
-let sse = SseManager::<Message, Tag>::new();
+let channels = SseManager::<Message, Tag>::new();
 
 // Connect and tag the channel as belonging to the user#1 who is an admin
 let stream = sse.create_stream([Tag::UserId(1), Tag::IsAdmin]).await;

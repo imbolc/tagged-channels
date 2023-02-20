@@ -1,4 +1,4 @@
-//! # axum-sse-manager
+//! # tagged-channel
 //!
 //! SSE channels manager for Axum framework
 //!
@@ -6,7 +6,7 @@
 //!
 //! ```rust,no_run
 //! # use serde::{Deserialize, Serialize};
-//! # use axum_sse_manager::SseManager;
+//! # use tagged_channels::SseManager;
 //! # tokio_test::block_on(async {
 //!
 //! // We're going to tag channels
@@ -24,7 +24,7 @@
 //! }
 //!
 //! // Create the manager
-//! let sse = SseManager::<Message, Tag>::new();
+//! let channels = SseManager::<Message, Tag>::new();
 //!
 //! // Connect and tag the channel as belonging to the user#1 who is an admin
 //! let stream = sse.create_stream([Tag::UserId(1), Tag::IsAdmin]).await;
@@ -48,13 +48,9 @@
 
 #![warn(clippy::all, missing_docs, nonstandard_style, future_incompatible)]
 
-use axum::response::sse::Event;
-use futures::stream::Stream;
 use parking_lot::Mutex;
-use serde::Serialize;
 use std::{
     collections::{HashMap, HashSet},
-    convert::Infallible,
     hash::Hash,
     sync::Arc,
 };
@@ -63,9 +59,9 @@ use tokio::sync::mpsc::{self, Receiver, Sender};
 type ChannelId = u64;
 
 /// SSE manager
-pub struct SseManager<M, T>(Arc<Mutex<ManagerInner<M, T>>>);
+pub struct TaggedChannels<M, T>(Arc<Mutex<ManagerInner<M, T>>>);
 
-impl<M, T> Clone for SseManager<M, T> {
+impl<M, T> Clone for TaggedChannels<M, T> {
     fn clone(&self) -> Self {
         Self(Arc::clone(&self.0))
     }
@@ -89,7 +85,7 @@ where
     T: Clone + Eq + Hash + PartialEq,
 {
     channel_id: ChannelId,
-    manager: SseManager<M, T>,
+    manager: TaggedChannels<M, T>,
 }
 
 /// A wrapper around [`Receiver`] to cleanup resources on `Drop`
@@ -102,37 +98,13 @@ where
     guard: ChannelGuard<M, T>,
 }
 
-impl<M, T> SseManager<M, T>
+impl<M, T> TaggedChannels<M, T>
 where
     T: Clone + Eq + Hash + PartialEq,
 {
     /// Creates a new manager
     pub fn new() -> Self {
         Default::default()
-    }
-
-    /// Creates a new stream of SSE events
-    pub async fn create_stream(
-        mut self,
-        tags: impl Into<Vec<T>>,
-    ) -> impl Stream<Item = Result<Event, Infallible>>
-    where
-        M: Serialize,
-    {
-        // TODO remove serialization
-        // or maybe the method itself
-        // or hide it behind `sse` flag
-        let tags = tags.into();
-        async_stream::stream! {
-            let mut rx = self.create_channel(tags);
-            loop {
-                if let Some(msg) = rx.recv().await {
-                    if let Ok(json) = serde_json::to_string(&msg) {
-                        yield Ok(Event::default().data(json));
-                    }
-                }
-            }
-        }
     }
 
     /// Creates a new channel and returns it's events receiver
@@ -168,17 +140,17 @@ where
         self.0.lock().channels.len()
     }
 
-    /// Sends the message to all tagged channels
-    pub async fn send_by_tag(&self, tag: &T, msg: M) {
-        let msg = Arc::new(msg);
+    /// Sends the `message` to all channels tagged by the `tag`
+    pub async fn send_by_tag(&self, tag: &T, message: M) {
+        let msg = Arc::new(message);
         for rx in self.tagged_senders(tag) {
             rx.send(Arc::clone(&msg)).await.ok();
         }
     }
 
-    /// Send the message to everyone
-    pub async fn broadcast(&self, msg: M) {
-        let msg = Arc::new(msg);
+    /// Send the `message` to everyone
+    pub async fn broadcast(&self, message: M) {
+        let msg = Arc::new(message);
         for rx in self.all_senders() {
             rx.send(Arc::clone(&msg)).await.ok();
         }
@@ -204,7 +176,7 @@ where
             .unwrap_or_default()
     }
 
-    /// Returns senders for all sessions
+    /// Returns all senders
     fn all_senders(&self) -> Vec<Sender<Arc<M>>> {
         self.0
             .lock()
@@ -215,7 +187,7 @@ where
     }
 }
 
-impl<M, T> Default for SseManager<M, T> {
+impl<M, T> Default for TaggedChannels<M, T> {
     fn default() -> Self {
         let inner = ManagerInner {
             last_id: 0,
@@ -230,7 +202,7 @@ impl<M, T> ChannelGuard<M, T>
 where
     T: Clone + Eq + Hash + PartialEq,
 {
-    fn new(channel_id: ChannelId, manager: SseManager<M, T>) -> Self {
+    fn new(channel_id: ChannelId, manager: TaggedChannels<M, T>) -> Self {
         Self {
             channel_id,
             manager,
