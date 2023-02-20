@@ -272,7 +272,8 @@ impl<M, T> GuardedReceiver<M, T>
 where
     T: Clone + Eq + Hash + PartialEq,
 {
-    async fn recv(&mut self) -> Option<Arc<M>> {
+    /// Receives the next event from the channel
+    pub async fn recv(&mut self) -> Option<Arc<M>> {
         self.rx.recv().await
     }
 }

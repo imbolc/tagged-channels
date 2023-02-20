@@ -1,4 +1,4 @@
-<h1>SSE manager</h1>
+<h1>#tagged-channel {{example}}</h1>
 
 <main>
     <form id="send-user" onsubmit="send(this); return false">
@@ -77,10 +77,21 @@ async function connect(form) {
 
     let params = new URLSearchParams({ is_admin });
     user_id && params.append("user_id", user_id);
-    let eventSource = new EventSource("/events?" + params.toString());
-    eventSource.onmessage = function (event) {
-        add_message("#received textarea", event.data);
-    };
+
+    let example = "{{example}}";
+    if (example == "ws") {
+        let socket = new WebSocket("ws://" + location.host + "/ws-events?" + params.toString());
+        socket.addEventListener('message', function (event) {
+            add_message("#received textarea", event.data);
+        });
+    } else if (example == "sse") {
+        let eventSource = new EventSource("/sse-events?" + params.toString());
+        eventSource.onmessage = function (event) {
+            add_message("#received textarea", event.data);
+        };
+    } else {
+        alert("Unknown example");
+    }
 
     let info = [];
     if (!user_id && !is_admin) {

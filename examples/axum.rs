@@ -1,8 +1,11 @@
 use axum::{
-    extract::{Json, Query, State},
+    extract::{
+        ws::{self, WebSocket, WebSocketUpgrade},
+        Json, Query, State,
+    },
     response::{
-        sse::{Event, Sse},
-        Html,
+        sse::{self, Sse},
+        Html, IntoResponse,
     },
     routing::{get, post},
     Router,
@@ -46,12 +49,15 @@ struct ConnectionParams {
 
 #[tokio::main]
 async fn main() {
-    let sse_sessions = SseManager::new();
+    let channels = SseManager::new();
     let app = Router::new()
         .route("/", get(index))
         .route("/send", post(send))
-        .route("/events", get(events))
-        .with_state(sse_sessions);
+        .route("/sse", get(sse_ui))
+        .route("/ws", get(ws_ui))
+        .route("/sse-events", get(events))
+        .route("/ws-events", get(ws_handler))
+        .with_state(channels);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
     axum::Server::bind(&addr)
@@ -60,15 +66,27 @@ async fn main() {
         .unwrap();
 }
 
-async fn index() -> Html<&'static str> {
-    Html(include_str!("users.html"))
+async fn index() -> Html<String> {
+    let page = [("WebSocket", "/ws"), ("SSE", "/sse")]
+        .iter()
+        .map(|(name, url)| format!(r#"<li><a href="{url}">{name} example</a></li>"#))
+        .collect();
+    Html(page)
+}
+
+async fn sse_ui() -> Html<String> {
+    Html(include_str!("ui.html").replace("{{example}}", "sse"))
+}
+
+async fn ws_ui() -> Html<String> {
+    Html(include_str!("ui.html").replace("{{example}}", "ws"))
 }
 
 /// Handler for browser to receive SSE events
 async fn events(
     State(sessions): State<SseManager<EventMessage, StreamTag>>,
     Query(ConnectionParams { user_id, is_admin }): Query<ConnectionParams>,
-) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+) -> Sse<impl Stream<Item = Result<sse::Event, Infallible>>> {
     let mut tags = Vec::new();
     if let Some(id) = user_id {
         tags.push(StreamTag::UserId(id));
@@ -92,5 +110,36 @@ async fn send(
         }
         Admin(data) => sse.send_by_tag(&StreamTag::IsAdmin, Admin(data)).await,
         Broadcast(data) => sse.broadcast(Broadcast(data)).await,
+    }
+}
+
+async fn ws_handler(
+    ws: WebSocketUpgrade,
+    Query(ConnectionParams { user_id, is_admin }): Query<ConnectionParams>,
+    State(manager): State<SseManager<EventMessage, StreamTag>>,
+) -> impl IntoResponse {
+    let mut tags = Vec::new();
+    if let Some(id) = user_id {
+        tags.push(StreamTag::UserId(id));
+    }
+    if is_admin {
+        tags.push(StreamTag::IsAdmin);
+    }
+    ws.on_upgrade(move |socket| handle_socket(socket, manager, tags))
+}
+
+/// Actual websocket statemachine (one will be spawned per connection)
+async fn handle_socket(
+    mut socket: WebSocket,
+    mut manager: SseManager<EventMessage, StreamTag>,
+    tags: Vec<StreamTag>,
+) {
+    let mut rx = manager.create_channel(tags);
+    loop {
+        let Some(msg) = rx.recv().await else { break; };
+        let Ok(json) = serde_json::to_string(&msg) else { continue; };
+        if socket.send(ws::Message::Text(json)).await.is_err() {
+            break;
+        }
     }
 }
