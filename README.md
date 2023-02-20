@@ -20,7 +20,7 @@ enum Tag {
 }
 
 // Events we're going to send
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(tag = "_type")]
 enum Message {
     Ping,

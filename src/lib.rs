@@ -17,7 +17,7 @@
 //! }
 //!
 //! // Events we're going to send
-//! #[derive(Clone, Deserialize, Serialize)]
+//! #[derive(Deserialize, Serialize)]
 //! #[serde(tag = "_type")]
 //! enum Message {
 //!     Ping,
@@ -79,7 +79,7 @@ pub struct ManagerInner<M, T> {
 }
 
 struct Channel<M, T> {
-    tx: Sender<M>,
+    tx: Sender<Arc<M>>,
     tags: Box<[T]>,
 }
 
@@ -124,10 +124,13 @@ where
 
     /// Creates a new channel and returns an event receiver and a guard to clean the manager when
     /// the channel is closed
-    pub fn create_channel(&mut self, tags: impl Into<Vec<T>>) -> (Receiver<M>, ChannelGuard<M, T>) {
+    pub fn create_channel(
+        &mut self,
+        tags: impl Into<Vec<T>>,
+    ) -> (Receiver<Arc<M>>, ChannelGuard<M, T>) {
         let tags = tags.into();
         // TODO is there reasons for a bigger size?
-        let (tx, rx) = mpsc::channel::<M>(1024);
+        let (tx, rx) = mpsc::channel::<Arc<M>>(1);
         let channel = Channel {
             tx,
             tags: tags.clone().into_boxed_slice(),
@@ -156,22 +159,18 @@ where
     }
 
     /// Sends the message to all tagged channels
-    pub async fn send_by_tag(&self, tag: &T, msg: M)
-    where
-        M: Clone,
-    {
+    pub async fn send_by_tag(&self, tag: &T, msg: M) {
+        let msg = Arc::new(msg);
         for rx in self.tagged_senders(tag) {
-            rx.send(msg.clone()).await.ok();
+            rx.send(Arc::clone(&msg)).await.ok();
         }
     }
 
     /// Send the message to everyone
-    pub async fn broadcast(&self, msg: M)
-    where
-        M: Clone,
-    {
+    pub async fn broadcast(&self, msg: M) {
+        let msg = Arc::new(msg);
         for rx in self.all_senders() {
-            rx.send(msg.clone()).await.ok();
+            rx.send(Arc::clone(&msg)).await.ok();
         }
     }
 
@@ -186,7 +185,7 @@ where
     }
 
     /// Returns senders by tag
-    fn tagged_senders(&self, tag: &T) -> Vec<Sender<M>> {
+    fn tagged_senders(&self, tag: &T) -> Vec<Sender<Arc<M>>> {
         let inner = self.0.lock();
         inner
             .tags
@@ -196,13 +195,24 @@ where
     }
 
     /// Returns senders for all sessions
-    fn all_senders(&self) -> Vec<Sender<M>> {
+    fn all_senders(&self) -> Vec<Sender<Arc<M>>> {
         self.0
             .lock()
             .channels
             .values()
             .map(|c| c.tx.clone())
             .collect()
+    }
+}
+
+impl<M, T> Default for SseManager<M, T> {
+    fn default() -> Self {
+        let inner = ManagerInner {
+            last_id: 0,
+            channels: HashMap::new(),
+            tags: HashMap::new(),
+        };
+        Self(Arc::new(Mutex::new(inner)))
     }
 }
 
@@ -231,7 +241,7 @@ impl<M, T> ManagerInner<M, T>
 where
     T: Eq + Hash + PartialEq,
 {
-    fn clone_tx(&self, channel_id: &ChannelId) -> Option<Sender<M>> {
+    fn clone_tx(&self, channel_id: &ChannelId) -> Option<Sender<Arc<M>>> {
         self.channels.get(channel_id).map(|c| c.tx.clone())
     }
 
@@ -245,16 +255,5 @@ where
         if empty {
             self.tags.remove(tag);
         }
-    }
-}
-
-impl<M, T> Default for SseManager<M, T> {
-    fn default() -> Self {
-        let inner = ManagerInner {
-            last_id: 0,
-            channels: HashMap::new(),
-            tags: HashMap::new(),
-        };
-        Self(Arc::new(Mutex::new(inner)))
     }
 }

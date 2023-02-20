@@ -19,7 +19,7 @@ enum StreamTag {
     IsAdmin,
 }
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(tag = "_type")]
 enum EventMessage {
     User(UserMessage),
@@ -27,13 +27,13 @@ enum EventMessage {
     Broadcast(SimpleMessage),
 }
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Deserialize, Serialize)]
 struct UserMessage {
     user_id: i32,
     message: String,
 }
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Deserialize, Serialize)]
 struct SimpleMessage {
     message: String,
 }
