@@ -10,14 +10,14 @@
 //! # tokio_test::block_on(async {
 //!
 //! // We're going to tag channels
-//! #[derive(Clone, Debug, Eq, Hash, PartialEq)]
+//! #[derive(Clone, Eq, Hash, PartialEq)]
 //! enum Tag {
 //!     UserId(i32),
 //!     IsAdmin,
 //! }
 //!
 //! // Events we're going to send
-//! #[derive(Clone, Debug, Deserialize, Serialize)]
+//! #[derive(Clone, Deserialize, Serialize)]
 //! #[serde(tag = "_type")]
 //! enum Message {
 //!     Ping,
@@ -26,7 +26,7 @@
 //! // Create the manager
 //! let sse = SseManager::<Message, Tag>::new();
 //!
-//! // Connect as an user#1, admin
+//! // Connect and tag the channel as belonging to the user#1 who is an admin
 //! let stream = sse.create_stream([Tag::UserId(1), Tag::IsAdmin]).await;
 //!
 //! # let sse = axum_sse_manager::SseManager::new();
@@ -55,49 +55,38 @@ use serde::Serialize;
 use std::{
     collections::{HashMap, HashSet},
     convert::Infallible,
-    fmt::Debug,
     hash::Hash,
     sync::Arc,
 };
-use tokio::sync::mpsc::{self, error::SendError, Receiver, Sender};
+use tokio::sync::mpsc::{self, Receiver, Sender};
 
 type ChannelId = u64;
 
 /// SSE manager
-#[derive(Debug, Clone)]
-pub struct SseManager<M, T>(Arc<Mutex<ManagerInner<M, T>>>)
-where
-    M: Clone + Debug,
-    T: Clone + Eq + Hash + PartialEq + Debug;
+pub struct SseManager<M, T>(Arc<Mutex<ManagerInner<M, T>>>);
+
+impl<M, T> Clone for SseManager<M, T> {
+    fn clone(&self) -> Self {
+        Self(Arc::clone(&self.0))
+    }
+}
 
 /// Inner part of the manager
-#[derive(Debug, Clone)]
-pub struct ManagerInner<M, T>
-where
-    M: Clone,
-    T: Clone + Eq + Hash + PartialEq,
-{
+pub struct ManagerInner<M, T> {
     last_id: u64,
     channels: HashMap<ChannelId, Channel<M, T>>,
     tags: HashMap<T, HashSet<ChannelId>>,
 }
 
-#[derive(Debug, Clone)]
-struct Channel<M, T>
-where
-    M: Clone,
-    T: Clone + Eq + Hash + PartialEq,
-{
+struct Channel<M, T> {
     tx: Sender<M>,
     tags: Box<[T]>,
 }
 
 /// An guard to trace channels disconnection
-#[derive(Debug)]
 pub struct ChannelGuard<M, T>
 where
-    M: Clone + Debug,
-    T: Clone + Eq + Hash + PartialEq + Debug,
+    T: Clone + Eq + Hash + PartialEq,
 {
     channel_id: ChannelId,
     manager: SseManager<M, T>,
@@ -105,8 +94,7 @@ where
 
 impl<M, T> SseManager<M, T>
 where
-    M: Clone + Debug,
-    T: Clone + Eq + Hash + PartialEq + Debug,
+    T: Clone + Eq + Hash + PartialEq,
 {
     /// Creates a new manager
     pub fn new() -> Self {
@@ -162,6 +150,31 @@ where
         (rx, ChannelGuard::new(channel_id, self.clone()))
     }
 
+    /// Returns number of active channels
+    pub fn num_connections(&self) -> usize {
+        self.0.lock().channels.len()
+    }
+
+    /// Sends the message to all tagged channels
+    pub async fn send_by_tag(&self, tag: &T, msg: M)
+    where
+        M: Clone,
+    {
+        for rx in self.tagged_senders(tag) {
+            rx.send(msg.clone()).await.ok();
+        }
+    }
+
+    /// Send the message to everyone
+    pub async fn broadcast(&self, msg: M)
+    where
+        M: Clone,
+    {
+        for rx in self.all_senders() {
+            rx.send(msg.clone()).await.ok();
+        }
+    }
+
     /// Removes the channel from the manager
     fn remove_channel(&mut self, channel_id: &ChannelId) {
         let mut inner = self.0.lock();
@@ -173,7 +186,7 @@ where
     }
 
     /// Returns senders by tag
-    fn sender_by_tag(&self, tag: &T) -> Vec<Sender<M>> {
+    fn tagged_senders(&self, tag: &T) -> Vec<Sender<M>> {
         let inner = self.0.lock();
         inner
             .tags
@@ -182,25 +195,8 @@ where
             .unwrap_or_default()
     }
 
-    /// Returns the session `Sender`
-    fn one_tx(&self, channel_id: &ChannelId) -> Option<Sender<M>> {
-        self.0.lock().clone_tx(channel_id)
-    }
-
-    /// Returns senders for multiple sessions
-    fn many_tx<'a, I>(&self, channel_ids: I) -> Vec<Sender<M>>
-    where
-        I: IntoIterator<Item = &'a ChannelId>,
-    {
-        let inner = self.0.lock();
-        channel_ids
-            .into_iter()
-            .filter_map(|id| inner.clone_tx(id))
-            .collect()
-    }
-
     /// Returns senders for all sessions
-    fn all_tx(&self) -> Vec<Sender<M>> {
+    fn all_senders(&self) -> Vec<Sender<M>> {
         self.0
             .lock()
             .channels
@@ -208,57 +204,11 @@ where
             .map(|c| c.tx.clone())
             .collect()
     }
-
-    /// Returns all session ids
-    pub fn channel_ids(&self) -> Vec<ChannelId> {
-        self.0.lock().channels.keys().cloned().collect()
-    }
-
-    /// Sends the message to all tagged channels
-    pub async fn send_by_tag(&self, tag: &T, msg: M) {
-        for rx in self.sender_by_tag(tag) {
-            rx.send(msg.clone()).await.ok();
-        }
-    }
-
-    /// Sends a message to the session
-    pub async fn send_to_one_channel(
-        &self,
-        channel_id: &ChannelId,
-        msg: M,
-    ) -> Result<(), SendError<M>> {
-        if let Some(tx) = self.one_tx(channel_id) {
-            tx.send(msg).await?;
-        }
-        Ok(())
-    }
-
-    /// Sends a message to the session
-    pub async fn send_to_many_channels<'a, I>(&self, channel_ids: I, msg: M)
-    where
-        I: IntoIterator<Item = &'a ChannelId>,
-        M: Clone,
-    {
-        for rx in self.many_tx(channel_ids) {
-            rx.send(msg.clone()).await.ok();
-        }
-    }
-
-    /// Send the message to everyone
-    pub async fn broadcast(&self, msg: M)
-    where
-        M: Clone,
-    {
-        for rx in self.all_tx() {
-            rx.send(msg.clone()).await.ok();
-        }
-    }
 }
 
 impl<M, T> ChannelGuard<M, T>
 where
-    M: Clone + Debug,
-    T: Clone + Eq + Hash + PartialEq + Debug,
+    T: Clone + Eq + Hash + PartialEq,
 {
     fn new(channel_id: ChannelId, manager: SseManager<M, T>) -> Self {
         Self {
@@ -270,8 +220,7 @@ where
 
 impl<M, T> Drop for ChannelGuard<M, T>
 where
-    M: Clone + Debug,
-    T: Clone + Eq + Hash + PartialEq + Debug,
+    T: Clone + Eq + Hash + PartialEq,
 {
     fn drop(&mut self) {
         self.manager.remove_channel(&self.channel_id);
@@ -280,8 +229,7 @@ where
 
 impl<M, T> ManagerInner<M, T>
 where
-    M: Clone,
-    T: Clone + Eq + Hash + PartialEq,
+    T: Eq + Hash + PartialEq,
 {
     fn clone_tx(&self, channel_id: &ChannelId) -> Option<Sender<M>> {
         self.channels.get(channel_id).map(|c| c.tx.clone())
@@ -300,11 +248,7 @@ where
     }
 }
 
-impl<M, T> Default for SseManager<M, T>
-where
-    M: Debug + Clone,
-    T: Debug + Clone + Eq + Hash + PartialEq,
-{
+impl<M, T> Default for SseManager<M, T> {
     fn default() -> Self {
         let inner = ManagerInner {
             last_id: 0,

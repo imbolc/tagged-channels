@@ -13,13 +13,13 @@ use serde::{Deserialize, Serialize};
 use std::convert::Infallible;
 use std::net::SocketAddr;
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Eq, Hash, PartialEq)]
 enum StreamTag {
     UserId(i32),
     IsAdmin,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(tag = "_type")]
 enum EventMessage {
     User(UserMessage),
@@ -27,18 +27,18 @@ enum EventMessage {
     Broadcast(SimpleMessage),
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 struct UserMessage {
     user_id: i32,
     message: String,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 struct SimpleMessage {
     message: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 struct ConnectionParams {
     user_id: Option<i32>,
     is_admin: bool,

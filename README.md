@@ -13,14 +13,14 @@ SSE channels manager for Axum framework
 ```rust,no_run
 
 // We're going to tag channels
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Eq, Hash, PartialEq)]
 enum Tag {
     UserId(i32),
     IsAdmin,
 }
 
 // Events we're going to send
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(tag = "_type")]
 enum Message {
     Ping,
@@ -29,7 +29,7 @@ enum Message {
 // Create the manager
 let sse = SseManager::<Message, Tag>::new();
 
-// Connect as an user#1, admin
+// Connect and tag the channel as belonging to the user#1 who is an admin
 let stream = sse.create_stream([Tag::UserId(1), Tag::IsAdmin]).await;
 
 
