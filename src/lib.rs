@@ -1,12 +1,15 @@
-//! # tagged-channel
+//! # tagged-channels
 //!
-//! SSE channels manager for Axum framework
+//! This library makes it easy to tag (WebSocket, SSE, ...) channels with e.g. user-id and then
+//! send events to all the channels opened by a particular user. It's framework agnostic, but for
+//! now has only an [axum example]. If you're using it with another framework, consider PR-ing an
+//! adapted example.
 //!
 //! ## Usage
 //!
 //! ```rust,no_run
 //! # use serde::{Deserialize, Serialize};
-//! # use tagged_channels::SseManager;
+//! # use tagged_channels::TaggedChannels;
 //! # tokio_test::block_on(async {
 //!
 //! // We're going to tag channels
@@ -24,27 +27,30 @@
 //! }
 //!
 //! // Create the manager
-//! let channels = SseManager::<Message, Tag>::new();
-//!
-//! // Connect and tag the channel as belonging to the user#1 who is an admin
-//! let stream = sse.create_stream([Tag::UserId(1), Tag::IsAdmin]).await;
-//!
-//! # let sse = axum_sse_manager::SseManager::new();
+//! let mut manager = TaggedChannels::<Message, Tag>::new();
 //!
 //! // Message to user#1
-//! sse.send_by_tag(&Tag::UserId(1), Message::Ping).await;
+//! manager.send_by_tag(&Tag::UserId(1), Message::Ping).await;
 //!
 //! // Message to all admins
-//! sse.send_by_tag(&Tag::UserId(1), Message::Ping).await;
+//! manager.send_by_tag(&Tag::UserId(1), Message::Ping).await;
 //!
 //! // Message to everyone
-//! sse.broadcast(Message::Ping).await;
+//! manager.broadcast(Message::Ping).await;
+//!
+//! // Connect and tag the channel as belonging to the user#1 who is an admin
+//! let mut channel = manager.create_channel([Tag::UserId(1), Tag::IsAdmin]);
+//!
+//! // Receive events coming from the channel
+//! while let Some(event) = channel.recv().await {
+//!     // send the event through WebSocket or SSE
+//! }
 //! # })
 //! ```
 //!
-//! Look at the [full example][example] for detail.
+//! Look at the full [axum example] for detail.
 //!
-//! [example]: https://github.com/imbolc/axum-sse-manager/blob/main/examples/users.rs
+//! [axum example]: https://github.com/imbolc/tagged-channels/blob/main/examples/axum.rs
 
 #![warn(clippy::all, missing_docs, nonstandard_style, future_incompatible)]
 
@@ -59,7 +65,7 @@ use tokio::sync::mpsc::{self, Receiver, Sender};
 type ChannelId = u64;
 
 /// SSE manager
-pub struct TaggedChannels<M, T>(Arc<Mutex<ManagerInner<M, T>>>);
+pub struct TaggedChannels<M, T>(Arc<Mutex<ChannelsInner<M, T>>>);
 
 impl<M, T> Clone for TaggedChannels<M, T> {
     fn clone(&self) -> Self {
@@ -68,7 +74,7 @@ impl<M, T> Clone for TaggedChannels<M, T> {
 }
 
 /// Inner part of the manager
-pub struct ManagerInner<M, T> {
+pub struct ChannelsInner<M, T> {
     last_id: u64,
     channels: HashMap<ChannelId, Channel<M, T>>,
     tags: HashMap<T, HashSet<ChannelId>>,
@@ -102,7 +108,7 @@ impl<M, T> TaggedChannels<M, T>
 where
     T: Clone + Eq + Hash + PartialEq,
 {
-    /// Creates a new manager
+    /// Creates a new channels manager
     pub fn new() -> Self {
         Default::default()
     }
@@ -189,7 +195,7 @@ where
 
 impl<M, T> Default for TaggedChannels<M, T> {
     fn default() -> Self {
-        let inner = ManagerInner {
+        let inner = ChannelsInner {
             last_id: 0,
             channels: HashMap::new(),
             tags: HashMap::new(),
@@ -219,7 +225,7 @@ where
     }
 }
 
-impl<M, T> ManagerInner<M, T>
+impl<M, T> ChannelsInner<M, T>
 where
     T: Eq + Hash + PartialEq,
 {

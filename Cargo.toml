@@ -1,9 +1,9 @@
 [package]
-description = "SSE channels manager for Axum framework"
+description = "Tag channels and message using tags (WebSockets, SSE users management)"
 edition = "2021"
 license = "MIT"
 name = "tagged-channels"
-repository = "https://github.com/imbolc/axum-sse-manager"
+repository = "https://github.com/imbolc/tagged-channels"
 version = "0.0.1"
 
 [dependencies]

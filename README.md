@@ -1,12 +1,15 @@
-[![License](https://img.shields.io/crates/l/axum-sse-manager.svg)](https://choosealicense.com/licenses/mit/)
-[![Crates.io](https://img.shields.io/crates/v/axum-sse-manager.svg)](https://crates.io/crates/axum-sse-manager)
-[![Docs.rs](https://docs.rs/axum-sse-manager/badge.svg)](https://docs.rs/axum-sse-manager)
+[![License](https://img.shields.io/crates/l/tagged-channels.svg)](https://choosealicense.com/licenses/mit/)
+[![Crates.io](https://img.shields.io/crates/v/tagged-channels.svg)](https://crates.io/crates/tagged-channels)
+[![Docs.rs](https://docs.rs/tagged-channels/badge.svg)](https://docs.rs/tagged-channels)
 
 <!-- cargo-sync-readme start -->
 
-# tagged-channel
+# tagged-channels
 
-SSE channels manager for Axum framework
+This library makes it easy to tag (WebSocket, SSE, ...) channels with e.g. user-id and then
+send events to all the channels opened by a particular user. It's framework agnostic, but for
+now has only an [axum example]. If you're using it with another framework, consider PR-ing an
+adapted example.
 
 ## Usage
 
@@ -27,25 +30,29 @@ enum Message {
 }
 
 // Create the manager
-let channels = SseManager::<Message, Tag>::new();
-
-// Connect and tag the channel as belonging to the user#1 who is an admin
-let stream = sse.create_stream([Tag::UserId(1), Tag::IsAdmin]).await;
-
+let mut manager = TaggedChannels::<Message, Tag>::new();
 
 // Message to user#1
-sse.send_by_tag(&Tag::UserId(1), Message::Ping).await;
+manager.send_by_tag(&Tag::UserId(1), Message::Ping).await;
 
 // Message to all admins
-sse.send_by_tag(&Tag::UserId(1), Message::Ping).await;
+manager.send_by_tag(&Tag::UserId(1), Message::Ping).await;
 
 // Message to everyone
-sse.broadcast(Message::Ping).await;
+manager.broadcast(Message::Ping).await;
+
+// Connect and tag the channel as belonging to the user#1 who is an admin
+let mut channel = manager.create_channel([Tag::UserId(1), Tag::IsAdmin]);
+
+// Receive events coming from the channel
+while let Some(event) = channel.recv().await {
+    // send the event through WebSocket or SSE
+}
 ```
 
-Look at the [full example][example] for detail.
+Look at the full [axum example] for detail.
 
-[example]: https://github.com/imbolc/axum-sse-manager/blob/main/examples/users.rs
+[axum example]: https://github.com/imbolc/tagged-channels/blob/main/examples/axum.rs
 
 <!-- cargo-sync-readme end -->
 

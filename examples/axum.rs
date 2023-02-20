@@ -120,10 +120,10 @@ async fn ws_events(
     Query(params): Query<ConnectionParams>,
     State(channels): State<TaggedChannels<EventMessage, ChannelTag>>,
 ) -> impl IntoResponse {
-    ws.on_upgrade(move |socket| ws_socket(socket, channels, params.as_tags()))
+    ws.on_upgrade(move |socket| handle_socket(socket, channels, params.as_tags()))
 }
 
-async fn ws_socket(
+async fn handle_socket(
     mut socket: WebSocket,
     mut channels: TaggedChannels<EventMessage, ChannelTag>,
     tags: Vec<ChannelTag>,
