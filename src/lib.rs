@@ -92,6 +92,16 @@ where
     manager: SseManager<M, T>,
 }
 
+/// A wrapper around [`Receiver`] to cleanup resources on `Drop`
+pub struct GuardedReceiver<M, T>
+where
+    T: Clone + Eq + Hash + PartialEq,
+{
+    rx: Receiver<Arc<M>>,
+    #[allow(dead_code)]
+    guard: ChannelGuard<M, T>,
+}
+
 impl<M, T> SseManager<M, T>
 where
     T: Clone + Eq + Hash + PartialEq,
@@ -109,9 +119,12 @@ where
     where
         M: Serialize,
     {
+        // TODO remove serialization
+        // or maybe the method itself
+        // or hide it behind `sse` flag
         let tags = tags.into();
         async_stream::stream! {
-            let (mut rx, _guard) = self.create_channel(tags);
+            let mut rx = self.create_channel(tags);
             loop {
                 if let Some(msg) = rx.recv().await {
                     if let Ok(json) = serde_json::to_string(&msg) {
@@ -122,12 +135,8 @@ where
         }
     }
 
-    /// Creates a new channel and returns an event receiver and a guard to clean the manager when
-    /// the channel is closed
-    pub fn create_channel(
-        &mut self,
-        tags: impl Into<Vec<T>>,
-    ) -> (Receiver<Arc<M>>, ChannelGuard<M, T>) {
+    /// Creates a new channel and returns it's events receiver
+    pub fn create_channel(&mut self, tags: impl Into<Vec<T>>) -> GuardedReceiver<M, T> {
         let tags = tags.into();
         // TODO is there reasons for a bigger size?
         let (tx, rx) = mpsc::channel::<Arc<M>>(1);
@@ -150,7 +159,8 @@ where
         }
         inner.last_id = channel_id;
 
-        (rx, ChannelGuard::new(channel_id, self.clone()))
+        let guard = ChannelGuard::new(channel_id, self.clone());
+        GuardedReceiver { rx, guard }
     }
 
     /// Returns number of active channels
@@ -255,5 +265,14 @@ where
         if empty {
             self.tags.remove(tag);
         }
+    }
+}
+
+impl<M, T> GuardedReceiver<M, T>
+where
+    T: Clone + Eq + Hash + PartialEq,
+{
+    async fn recv(&mut self) -> Option<Arc<M>> {
+        self.rx.recv().await
     }
 }
