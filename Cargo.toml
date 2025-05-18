@@ -1,6 +1,6 @@
 [package]
 description = "Tag channels and message using tags (WebSockets, SSE users management)"
-edition = "2021"
+edition = "2024"
 license = "MIT"
 name = "tagged-channels"
 repository = "https://github.com/imbolc/tagged-channels"
@@ -12,7 +12,7 @@ tokio = { version = "1", features = ["sync"] }
 
 [dev-dependencies]
 async-stream = "0.3"
-axum = { version = "0.6", features = ["ws"] }
+axum = { version = "0.8", features = ["ws"] }
 futures = "0.3"
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"

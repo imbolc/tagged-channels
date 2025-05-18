@@ -1,16 +1,16 @@
 use std::{convert::Infallible, net::SocketAddr};
 
 use axum::{
+    Router,
     extract::{
-        ws::{Message as WsMessage, WebSocket, WebSocketUpgrade},
         Json, Query, State,
+        ws::{Message as WsMessage, WebSocket, WebSocketUpgrade},
     },
     response::{
-        sse::{Event as SseEvent, Sse},
         Html, IntoResponse,
+        sse::{Event as SseEvent, Sse},
     },
     routing::{get, post},
-    Router,
 };
 use futures::stream::Stream;
 use serde::{Deserialize, Serialize};
@@ -60,10 +60,13 @@ async fn main() {
         .with_state(channels);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
-    axum::Server::bind(&addr)
-        .serve(app.into_make_service_with_connect_info::<SocketAddr>())
-        .await
-        .unwrap();
+    let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await
+    .unwrap();
 }
 
 async fn index() -> Html<String> {
@@ -133,7 +136,7 @@ async fn handle_socket(
         let Ok(json) = serde_json::to_string(&msg) else {
             continue;
         };
-        if socket.send(WsMessage::Text(json)).await.is_err() {
+        if socket.send(WsMessage::Text(json.into())).await.is_err() {
             break;
         }
     }
