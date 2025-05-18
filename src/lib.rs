@@ -1,9 +1,9 @@
 //! # tagged-channels
 //!
-//! This library makes it easy to tag (WebSocket, SSE, ...) channels with e.g. user-id and then
-//! send events to all the channels opened by a particular user. It's framework agnostic, but for
-//! now has only an [axum example]. If you're using it with another framework, consider PR-ing an
-//! adapted example.
+//! This library makes it easy to tag (WebSocket, SSE, ...) channels with e.g.
+//! user-id and then send events to all the channels opened by a particular
+//! user. It's framework agnostic, but for now has only an [axum example]. If
+//! you're using it with another framework, consider PR-ing an adapted example.
 //!
 //! ## Usage
 //!
@@ -54,12 +54,13 @@
 
 #![warn(clippy::all, missing_docs, nonstandard_style, future_incompatible)]
 
-use parking_lot::Mutex;
 use std::{
     collections::{HashMap, HashSet},
     hash::Hash,
     sync::Arc,
 };
+
+use parking_lot::Mutex;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 
 type ChannelId = u64;
@@ -85,7 +86,7 @@ struct Channel<M, T> {
     tags: Box<[T]>,
 }
 
-/// An guard to trace channels disconnection
+/// A guard to trace channels disconnection
 pub struct ChannelGuard<M, T>
 where
     T: Clone + Eq + Hash + PartialEq,
@@ -94,7 +95,7 @@ where
     manager: TaggedChannels<M, T>,
 }
 
-/// A wrapper around [`Receiver`] to cleanup resources on `Drop`
+/// A wrapper around [`Receiver`] to clean up resources on `Drop`
 pub struct GuardedReceiver<M, T>
 where
     T: Clone + Eq + Hash + PartialEq,

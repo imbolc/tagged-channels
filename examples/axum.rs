@@ -1,3 +1,5 @@
+use std::{convert::Infallible, net::SocketAddr};
+
 use axum::{
     extract::{
         ws::{Message as WsMessage, WebSocket, WebSocketUpgrade},
@@ -12,8 +14,6 @@ use axum::{
 };
 use futures::stream::Stream;
 use serde::{Deserialize, Serialize};
-use std::convert::Infallible;
-use std::net::SocketAddr;
 use tagged_channels::TaggedChannels;
 
 #[derive(Clone, Eq, Hash, PartialEq)]
@@ -130,7 +130,9 @@ async fn handle_socket(
 ) {
     let mut rx = channels.create_channel(tags);
     while let Some(msg) = rx.recv().await {
-        let Ok(json) = serde_json::to_string(&msg) else { continue };
+        let Ok(json) = serde_json::to_string(&msg) else {
+            continue;
+        };
         if socket.send(WsMessage::Text(json)).await.is_err() {
             break;
         }
