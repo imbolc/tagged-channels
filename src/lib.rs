@@ -64,7 +64,6 @@ where
     /// Creates a new channel and returns it's events receiver
     pub fn create_channel(&mut self, tags: impl Into<Vec<T>>) -> GuardedReceiver<M, T> {
         let tags = tags.into();
-        // TODO is there reasons for a bigger size?
         let (tx, rx) = mpsc::channel::<Arc<M>>(1);
         let channel = Channel {
             tx,
@@ -108,6 +107,11 @@ where
         for rx in self.all_senders() {
             rx.send(Arc::clone(&msg)).await.ok();
         }
+    }
+
+    /// Returns tags of all currently connected channels
+    pub fn connected_tags(&self) -> Vec<T> {
+        self.0.lock().tags.keys().cloned().collect()
     }
 
     /// Removes the channel from the manager
