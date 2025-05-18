@@ -1,0 +1,2 @@
+# Exclude from `git diff`
+/Cargo.lock -diff
