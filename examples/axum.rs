@@ -59,8 +59,10 @@ async fn main() {
         .route("/ws-events", get(ws_events))
         .with_state(channels);
 
-    let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
-    let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:3000")
+        .await
+        .unwrap();
+    println!("listening on {}", listener.local_addr().unwrap());
     axum::serve(
         listener,
         app.into_make_service_with_connect_info::<SocketAddr>(),
@@ -106,7 +108,7 @@ async fn send(
 /// Handler for browser to receive SSE events
 async fn events(
     Query(params): Query<ConnectionParams>,
-    State(mut channels): State<TaggedChannels<EventMessage, ChannelTag>>,
+    State(channels): State<TaggedChannels<EventMessage, ChannelTag>>,
 ) -> Sse<impl Stream<Item = Result<SseEvent, Infallible>>> {
     let stream = async_stream::stream! {
         let mut rx = channels.create_channel(params.as_tags());
@@ -128,7 +130,7 @@ async fn ws_events(
 
 async fn handle_socket(
     mut socket: WebSocket,
-    mut channels: TaggedChannels<EventMessage, ChannelTag>,
+    channels: TaggedChannels<EventMessage, ChannelTag>,
     tags: Vec<ChannelTag>,
 ) {
     let mut rx = channels.create_channel(tags);

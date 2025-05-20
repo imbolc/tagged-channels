@@ -4,7 +4,7 @@ edition = "2024"
 license = "MIT"
 name = "tagged-channels"
 repository = "https://github.com/imbolc/tagged-channels"
-version = "0.0.1"
+version = "0.1.0"
 
 [dependencies]
 parking_lot = "0.12"

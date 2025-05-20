@@ -33,7 +33,7 @@ struct Channel<M, T> {
     tags: Box<[T]>,
 }
 
-/// A guard to trace channels disconnection
+/// A guard to clean up channel resources when the receiver is dropped
 pub struct ChannelGuard<M, T>
 where
     T: Clone + Eq + Hash + PartialEq,
@@ -61,8 +61,8 @@ where
         Default::default()
     }
 
-    /// Creates a new channel and returns it's events receiver
-    pub fn create_channel(&mut self, tags: impl Into<Vec<T>>) -> GuardedReceiver<M, T> {
+    /// Creates a new channel and returns its events receiver
+    pub fn create_channel(&self, tags: impl Into<Vec<T>>) -> GuardedReceiver<M, T> {
         let tags = tags.into();
         let (tx, rx) = mpsc::channel::<Arc<M>>(1);
         let channel = Channel {
@@ -115,7 +115,7 @@ where
     }
 
     /// Removes the channel from the manager
-    fn remove_channel(&mut self, channel_id: &ChannelId) {
+    fn remove_channel(&self, channel_id: &ChannelId) {
         let mut inner = self.0.lock();
         if let Some(channel) = inner.channels.remove(channel_id) {
             for tag in channel.tags.iter() {
